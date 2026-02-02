@@ -1,0 +1,148 @@
+/* Global.css - Transitions et animations rapides */
+
+:root {
+  --transition-fast: 0.15s ease-in-out;
+  --transition-normal: 0.2s ease-in-out;
+  --transition-slow: 0.3s ease-in-out;
+}
+
+/* Animations rapides pour tous les éléments */
+* {
+  transition: background-color var(--transition-fast), 
+              color var(--transition-fast),
+              opacity var(--transition-fast),
+              transform var(--transition-fast);
+}
+
+/* Animations de chargement ultra-rapides */
+@keyframes fadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes slideInUp {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.6; }
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+/* Classes d'animation réutilisables */
+.fade-in {
+  animation: fadeIn 0.2s ease-in-out;
+}
+
+.slide-in-up {
+  animation: slideInUp 0.2s ease-in-out;
+}
+
+.pulse {
+  animation: pulse 0.8s ease-in-out infinite;
+}
+
+/* Optimisations de performance */
+body {
+  will-change: transform;
+}
+
+img {
+  will-change: opacity;
+}
+
+/* Transitions rapides pour les formulaires */
+input, textarea, select {
+  transition: border-color 0.15s, background-color 0.15s, box-shadow 0.15s;
+}
+
+input:focus, textarea:focus, select:focus {
+  outline: none;
+  box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.1);
+  border-color: #6366f1;
+}
+
+/* Transitions rapides pour les boutons */
+button {
+  transition: all 0.15s ease-in-out;
+}
+
+button:hover {
+  transform: translateY(-2px);
+}
+
+button:active {
+  transform: translateY(0);
+}
+
+/* Transitions rapides pour les liens */
+a {
+  transition: color 0.15s ease-in-out, text-decoration 0.15s ease-in-out;
+}
+
+/* Loading state ultra-rapide */
+.loading {
+  opacity: 0.7;
+}
+
+/* Overlay avec transition rapide */
+.overlay {
+  animation: fadeIn 0.15s ease-in-out;
+}
+
+/* Modales avec animation rapide */
+.modal {
+  animation: slideInUp 0.2s ease-in-out;
+}
+
+/* Dropdowns avec animation rapide */
+.dropdown {
+  animation: slideInUp 0.15s ease-in-out;
+}
+
+/* Cards avec animation rapide */
+.card {
+  transition: all 0.2s ease-in-out;
+}
+
+.card:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+}
+
+/* Tables avec transitions rapides */
+table tr {
+  transition: background-color 0.15s ease-in-out;
+}
+
+table tr:hover {
+  background-color: #f3f4f6;
+}
+
+/* Scrolling fluide */
+html {
+  scroll-behavior: smooth;
+}
+
+/* Désactiver les transitions pendant le chargement */
+.no-transition * {
+  transition: none !important;
+  animation: none !important;
+}
+
+/* Optimisation GPU */
+.gpu-accelerated {
+  transform: translateZ(0);
+  will-change: transform;
+}
