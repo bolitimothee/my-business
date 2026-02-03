@@ -19,18 +19,18 @@ export default function AppWrapper() {
     }
   }, [session]);
 
-  // Timeout ULTRA court - 300ms max
+  // Timeout - Force show content after 8 seconds if still loading
   useEffect(() => {
-    if (!session) return; // Ne pas déclencher si pas de session
+    if (!session) return;
     
     const timer = setTimeout(() => {
       if (profileLoading) {
-        console.warn('⏰ Force close profile loading (300ms)');
+        console.warn('⏰ Force close profile loading (8s) - content shown with default profile');
         forceCloseProfileLoading();
         setDisplayContent(true);
         setFadeIn(true);
       }
-    }, 300);
+    }, 8000);
 
     return () => clearTimeout(timer);
   }, [profileLoading, forceCloseProfileLoading, session]);

@@ -3,8 +3,8 @@ import { supabase } from '../services/supabaseClient';
 
 const AuthContext = createContext(undefined);
 
-const PROFILE_LOAD_TIMEOUT = 300;  // 0.3 secondes max (ultra-rapide)
-const INIT_TIMEOUT = 300;          // 0.3 secondes max (ultra-rapide)
+const PROFILE_LOAD_TIMEOUT = 5000;  // 5 secondes
+const INIT_TIMEOUT = 3000;          // 3 secondes
 
 export function AuthProvider({ children }) {
   const [session, setSession] = useState(null);
@@ -84,41 +84,66 @@ export function AuthProvider({ children }) {
     }, PROFILE_LOAD_TIMEOUT);
 
     try {
+      // Essayer de charger le profil
       const { data, error: fetchError } = await supabase
         .from('user_profiles')
         .select('*')
-        .eq('user_id', userId)
-        .single();
+        .eq('user_id', userId);
 
+      // Gérer les erreurs RLS/500
       if (fetchError) {
+        console.warn('⚠️ Profile fetch error (RLS/500):', fetchError.message);
+        // Ne pas bloquer, créer un profil par défaut
+        throw new Error('RLS_ERROR');
+      }
+
+      if (data && data.length > 0) {
+        console.log('✅ Profile loaded successfully');
+        setUserProfile(data[0]);
+        setIsAccountValid(checkAccountStatus(data[0]));
+      } else {
         // Profil n'existe pas, créer un par défaut
         console.warn('⚠️ Profile not found, creating default...');
         const defaultProfile = {
           user_id: userId,
           role: 'user',
           is_active: true,
+          created_at: new Date().toISOString(),
         };
         
-        const { error: insertError } = await supabase
-          .from('user_profiles')
-          .insert(defaultProfile);
-        
-        if (insertError) {
-          console.error('❌ Could not create profile:', insertError);
-        } else {
-          console.log('✅ Default profile created');
+        try {
+          const { data: insertedData, error: insertError } = await supabase
+            .from('user_profiles')
+            .insert([defaultProfile])
+            .select()
+            .single();
+          
+          if (insertError) {
+            console.warn('⚠️ Could not create profile in DB (RLS issue):', insertError.message);
+            // Utiliser le profil en mémoire même si l'insert échoue
+            setUserProfile(defaultProfile);
+            setIsAccountValid(true);
+          } else {
+            console.log('✅ Default profile created in DB');
+            setUserProfile(insertedData);
+            setIsAccountValid(true);
+          }
+        } catch (insertErr) {
+          console.warn('⚠️ Insert error:', insertErr);
+          setUserProfile(defaultProfile);
+          setIsAccountValid(true);
         }
-        setUserProfile(defaultProfile);
-        setIsAccountValid(true);
-      } else if (data) {
-        console.log('✅ Profile loaded successfully');
-        setUserProfile(data);
-        setIsAccountValid(checkAccountStatus(data));
       }
     } catch (err) {
-      console.error('❌ Error loading profile:', err);
-      setUserProfile(null);
-      setIsAccountValid(true); // Permettre l'accès en fallback
+      console.warn('⚠️ Error loading profile - using default:', err instanceof Error ? err.message : err);
+      const defaultProfile = {
+        user_id: userId,
+        role: 'user',
+        is_active: true,
+        created_at: new Date().toISOString(),
+      };
+      setUserProfile(defaultProfile);
+      setIsAccountValid(true);
     } finally {
       // Nettoyer le timeout
       if (profileTimeoutRef.current) {
@@ -165,11 +190,12 @@ export function AuthProvider({ children }) {
       }
     };
 
-    // Timeout global pour initAuth
+    // Timeout global pour initAuth - utiliser une durée plus longue
     initTimeoutRef.current = setTimeout(() => {
       if (isMounted) {
         console.warn(`⏰ Init timeout après ${INIT_TIMEOUT}ms`);
         setLoading(false);
+        setProfileLoading(false);
       }
     }, INIT_TIMEOUT);
 
