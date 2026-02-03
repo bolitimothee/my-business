@@ -130,37 +130,37 @@ CREATE POLICY "Admins can update all profiles"
     )
   );
 
--- 9. POLITIQUES POUR products (BLOQUÉES SI COMPTE EXPIRÉ)
+-- 9. POLITIQUES POUR products (SIMPLES - Juste vérifier propriétaire)
 
-CREATE POLICY "Users can view own products if account valid" 
+CREATE POLICY "Users can view own products" 
   ON products FOR SELECT 
-  USING (auth.uid() = user_id AND is_account_valid(auth.uid()));
+  USING (auth.uid() = user_id);
 
-CREATE POLICY "Users can insert own products if account valid" 
+CREATE POLICY "Users can insert own products" 
   ON products FOR INSERT 
-  WITH CHECK (auth.uid() = user_id AND is_account_valid(auth.uid()));
+  WITH CHECK (auth.uid() = user_id);
 
-CREATE POLICY "Users can update own products if account valid" 
+CREATE POLICY "Users can update own products" 
   ON products FOR UPDATE 
-  USING (auth.uid() = user_id AND is_account_valid(auth.uid()));
+  USING (auth.uid() = user_id);
 
-CREATE POLICY "Users can delete own products if account valid" 
+CREATE POLICY "Users can delete own products" 
   ON products FOR DELETE 
-  USING (auth.uid() = user_id AND is_account_valid(auth.uid()));
+  USING (auth.uid() = user_id);
 
--- 10. POLITIQUES POUR sales (BLOQUÉES SI COMPTE EXPIRÉ)
+-- 10. POLITIQUES POUR sales (SIMPLES - Juste vérifier propriétaire)
 
-CREATE POLICY "Users can view own sales if account valid" 
+CREATE POLICY "Users can view own sales" 
   ON sales FOR SELECT 
-  USING (auth.uid() = user_id AND is_account_valid(auth.uid()));
+  USING (auth.uid() = user_id);
 
-CREATE POLICY "Users can insert own sales if account valid" 
+CREATE POLICY "Users can insert own sales" 
   ON sales FOR INSERT 
-  WITH CHECK (auth.uid() = user_id AND is_account_valid(auth.uid()));
+  WITH CHECK (auth.uid() = user_id);
 
-CREATE POLICY "Users can delete own sales if account valid" 
+CREATE POLICY "Users can delete own sales" 
   ON sales FOR DELETE 
-  USING (auth.uid() = user_id AND is_account_valid(auth.uid()));
+  USING (auth.uid() = user_id);
 
 -- 11. FONCTION POUR METTRE À JOUR updated_at AUTOMATIQUEMENT
 CREATE OR REPLACE FUNCTION update_updated_at_column()

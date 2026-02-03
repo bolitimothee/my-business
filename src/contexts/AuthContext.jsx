@@ -21,15 +21,39 @@ export function AuthProvider({ children }) {
   const loadProfileAbortRef = useRef(null);
 
   const checkAccountStatus = (profile) => {
+    // Vérifier si le compte est désactivé
     if (!profile.is_active) {
+      console.log('🔴 Compte désactivé');
+      setError('Votre compte a été désactivé. Veuillez contacter le support.');
       return false;
     }
+    
+    // Vérifier si le compte est expiré
     if (profile.expiry_date) {
       const expiry = new Date(profile.expiry_date);
-      if (new Date() > expiry) {
+      const now = new Date();
+      
+      if (now > expiry) {
+        console.log('⏰ Abonnement expiré:', profile.expiry_date);
+        setError('🔴 Votre abonnement a expiré. Vous êtes déconnecté.');
+        
+        // Forcer la déconnexion - sera appelée via le useEffect
+        setSession(null);
+        setUser(null);
+        setUserProfile(null);
+        setIsAccountValid(false);
+        
         return false;
       }
+      
+      // Afficher un avertissement si proche de l'expiration (5 jours avant)
+      const daysUntilExpiry = Math.ceil((expiry - now) / (1000 * 60 * 60 * 24));
+      if (daysUntilExpiry <= 5 && daysUntilExpiry > 0) {
+        console.log(`⚠️ Abonnement expire dans ${daysUntilExpiry} jours`);
+        setError(`⚠️ Attention: Votre abonnement expire dans ${daysUntilExpiry} jours`);
+      }
     }
+    
     return true;
   };
 
@@ -188,6 +212,34 @@ export function AuthProvider({ children }) {
       authListener?.subscription.unsubscribe();
     };
   }, []);
+
+  // Vérifier l'expiration de l'abonnement toutes les 30 secondes
+  useEffect(() => {
+    if (!userProfile || !userProfile.expiry_date) return;
+
+    const checkExpiration = () => {
+      const expiry = new Date(userProfile.expiry_date);
+      const now = new Date();
+      
+      if (now > expiry) {
+        console.log('⏰ Abonnement expiré - Déconnexion automatique');
+        setError('🔴 Votre abonnement a expiré. Vous êtes déconnecté.');
+        setSession(null);
+        setUser(null);
+        setUserProfile(null);
+        setIsAccountValid(false);
+      }
+    };
+
+    const expirationCheckInterval = setInterval(checkExpiration, 30000); // Vérifier chaque 30 secondes
+    
+    // Vérification immédiate au montage
+    checkExpiration();
+
+    return () => {
+      clearInterval(expirationCheckInterval);
+    };
+  }, [userProfile]);
 
   const signUp = async (email, password) => {
     try {

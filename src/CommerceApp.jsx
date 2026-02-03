@@ -45,17 +45,23 @@ export default function CommerceApp() {
     setAppLoading(true);
     setError(null);
     try {
+      console.log('📥 Chargement produits pour user:', user.id);
       const { data, error: fetchError } = await supabase
         .from('products')
         .select('*')
         .eq('user_id', user.id)
         .order('created_at', { ascending: false });
-      if (fetchError) throw fetchError;
+      if (fetchError) {
+        console.error('❌ Erreur fetch produits:', fetchError);
+        throw fetchError;
+      }
+      console.log('✅ Produits chargés:', data?.length || 0);
       setProducts(data || []);
       setError(null);
     } catch (err) {
-      console.error('Error loading products:', err);
-      setError('Erreur lors du chargement des produits');
+      const message = err instanceof Error ? err.message : 'Erreur inconnue';
+      console.error('🔴 loadProducts Error:', message);
+      setError(`❌ Erreur chargement: ${message}`);
     } finally {
       setAppLoading(false);
     }
@@ -64,20 +70,29 @@ export default function CommerceApp() {
   const loadSales = async () => {
     if (!user) return;
     try {
+      console.log('📥 Chargement ventes pour user:', user.id);
       const { data, error: fetchError } = await supabase
         .from('sales')
         .select('*')
         .eq('user_id', user.id)
         .order('sale_date', { ascending: false });
-      if (fetchError) throw fetchError;
+      if (fetchError) {
+        console.error('❌ Erreur fetch ventes:', fetchError);
+        throw fetchError;
+      }
+      console.log('✅ Ventes chargées:', data?.length || 0);
       setSales(data || []);
     } catch (err) {
-      console.error('Error loading sales:', err);
+      const message = err instanceof Error ? err.message : 'Erreur inconnue';
+      console.error('🔴 loadSales Error:', message);
     }
   };
 
   const handleAddProduct = async () => {
-    if (!user) return;
+    if (!user) {
+      setError('❌ Utilisateur non authentifié');
+      return;
+    }
     if (!formData.name || !formData.quantity || !formData.cost_price || !formData.sale_price || !formData.category) {
       alert('Tous les champs sont obligatoires');
       return;
@@ -85,7 +100,8 @@ export default function CommerceApp() {
 
     try {
       if (editingId) {
-        const { error: updateError } = await supabase
+        console.log('📝 Mise à jour produit:', editingId);
+        const { error: updateError, data } = await supabase
           .from('products')
           .update({
             name: formData.name,
@@ -96,10 +112,15 @@ export default function CommerceApp() {
           })
           .eq('id', editingId)
           .eq('user_id', user.id);
-        if (updateError) throw updateError;
+        if (updateError) {
+          console.error('❌ Erreur mise à jour:', updateError);
+          throw updateError;
+        }
+        console.log('✅ Produit mis à jour');
         setEditingId(null);
       } else {
-        const { error: insertError } = await supabase
+        console.log('➕ Création nouveau produit');
+        const { error: insertError, data } = await supabase
           .from('products')
           .insert({
             user_id: user.id,
@@ -109,19 +130,27 @@ export default function CommerceApp() {
             sale_price: Number(formData.sale_price),
             category: formData.category,
           });
-        if (insertError) throw insertError;
+        if (insertError) {
+          console.error('❌ Erreur insertion:', insertError);
+          throw insertError;
+        }
+        console.log('✅ Produit créé');
       }
       setFormData({ name: '', quantity: 0, cost_price: 0, sale_price: 0, category: '' });
       await loadProducts();
       setError(null);
     } catch (err) {
-      const message = err instanceof Error ? err.message : 'Erreur';
-      setError(message);
+      const message = err instanceof Error ? err.message : 'Erreur inconnue';
+      console.error('🔴 handleAddProduct Error:', message);
+      setError(`❌ Erreur: ${message}`);
     }
   };
 
   const handleSale = async () => {
-    if (!user) return;
+    if (!user) {
+      setError('❌ Utilisateur non authentifié');
+      return;
+    }
     if (!saleForm.product_id || !saleForm.quantity) {
       alert('Veuillez sélectionner un produit et une quantité');
       return;
@@ -142,6 +171,7 @@ export default function CommerceApp() {
 
       const saleDate = new Date().toISOString();
       
+      console.log('💰 Enregistrement de vente:', { product_id: product.id, quantity });
       const { error: insertError } = await supabase
         .from('sales')
         .insert({
@@ -153,22 +183,32 @@ export default function CommerceApp() {
           cost_price: product.cost_price,
           sale_date: saleDate,
         });
-      if (insertError) throw insertError;
+      if (insertError) {
+        console.error('❌ Erreur insertion vente:', insertError);
+        throw insertError;
+      }
+      console.log('✅ Vente enregistrée');
 
+      console.log('📦 Mise à jour stock');
       const { error: updateError } = await supabase
         .from('products')
         .update({ quantity: product.quantity - quantity })
         .eq('id', product.id)
         .eq('user_id', user.id);
-      if (updateError) throw updateError;
+      if (updateError) {
+        console.error('❌ Erreur mise à jour stock:', updateError);
+        throw updateError;
+      }
+      console.log('✅ Stock mis à jour');
 
       setSaleForm({ product_id: '', quantity: '' });
       await loadProducts();
       await loadSales();
       setError(null);
     } catch (err) {
-      const message = err instanceof Error ? err.message : 'Erreur';
-      setError(message);
+      const message = err instanceof Error ? err.message : 'Erreur inconnue';
+      console.error('🔴 handleSale Error:', message);
+      setError(`❌ Erreur: ${message}`);
     }
   };
 
