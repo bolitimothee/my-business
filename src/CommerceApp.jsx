@@ -13,7 +13,7 @@ import './styles/FinanceReport.css';
 import './styles/ExportModal.css';
 import './styles/CommerceApp.css';
 
-export default function CommerceApp() {
+export default function CommerceApp({ onDataReady }) {
   const { user, userProfile, signOut, isAccountValid, profileLoading, loading } = useAuth();
   const [activeTab, setActiveTab] = useState('dashboard');
   const [showMenu, setShowMenu] = useState(false);
@@ -25,6 +25,7 @@ export default function CommerceApp() {
   const [sales, setSales] = useState([]);
   const [appLoading, setAppLoading] = useState(true);
   const [error, setError] = useState(null);
+  const [dataInitialized, setDataInitialized] = useState(false);
   const [formData, setFormData] = useState({
     name: '',
     quantity: 0,
@@ -50,10 +51,42 @@ export default function CommerceApp() {
 
   // Recharger produits et ventes quand l'utilisateur est prêt (après refresh)
   useEffect(() => {
-    if (user?.id && isAccountValid && !profileLoading) {
-      loadProducts();
-      loadSales();
-    }
+    if (!user?.id || !isAccountValid || profileLoading) return;
+
+    console.log('🚀 Début initialisation des données de l\'app');
+    setAppLoading(true);
+
+    // Étape 1: Synchroniser d'abord les ventes en attente
+    const initializeData = async () => {
+      try {
+        console.log('📤 [Étape 1] Synchronisation des ventes en attente...');
+        await processPendingSales();
+        
+        console.log('📥 [Étape 2] Chargement des produits...');
+        await loadProducts();
+        
+        console.log('📥 [Étape 3] Chargement des ventes...');
+        await loadSales();
+        
+        console.log('✅ [Complète] Toutes les données sont chargées');
+        setDataInitialized(true);
+        setAppLoading(false);
+        
+        // Notifier AppWrapper que les données sont prêtes
+        if (onDataReady) {
+          setTimeout(() => onDataReady(), 300);
+        }
+      } catch (err) {
+        console.error('🔴 Erreur lors de l\'initialisation:', err);
+        setAppLoading(false);
+        setDataInitialized(true); // Continuer même s'il y a une erreur
+        if (onDataReady) {
+          setTimeout(() => onDataReady(), 300);
+        }
+      }
+    };
+
+    initializeData();
   }, [user?.id, isAccountValid, profileLoading]);
   // Mettre à jour les stats de la queue
   const updateQueueStats = () => {
@@ -70,8 +103,6 @@ export default function CommerceApp() {
   }, []);
   const loadProducts = async () => {
     if (!user || profileLoading) return;
-    setAppLoading(true);
-    setError(null);
     try {
       console.log('📥 Chargement produits pour user:', user.id);
       const { data, error: fetchError } = await supabase
@@ -90,8 +121,6 @@ export default function CommerceApp() {
       const message = err instanceof Error ? err.message : 'Erreur inconnue';
       console.error('🔴 loadProducts Error:', message);
       setError(`❌ Erreur chargement: ${message}`);
-    } finally {
-      setAppLoading(false);
     }
   };
 
@@ -360,15 +389,40 @@ export default function CommerceApp() {
     return <div />;
   }
 
-  // DOUBLE PROTECTION: Ne pas afficher le loading du profil ici
-  // AppWrapper gère déjà le profileLoading
-  // Cette vérification est un fallback au cas où profileLoading se reste coincé
-  if (profileLoading) {
-    console.warn('⚠️ CommerceApp: ProfileLoading is true, should be handled by AppWrapper');
-    // Afficher le contenu quand même après un certain délai
+  // AFFICHER LE LOADING SI LES DONNÉES NE SONT PAS INITIALISÉES
+  if (!dataInitialized) {
     return (
-      <div className="loading-screen">
-        <p>Chargement du profil...</p>
+      <div className="loading-screen" style={{
+        display: 'flex',
+        justifyContent: 'center',
+        alignItems: 'center',
+        height: '100vh',
+        width: '100%',
+        flexDirection: 'column',
+        gap: '20px',
+        background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
+      }}>
+        <div style={{
+          width: '40px',
+          height: '40px',
+          border: '3px solid rgba(255, 255, 255, 0.3)',
+          borderTop: '3px solid white',
+          borderRadius: '50%',
+          animation: 'spin 0.6s linear infinite',
+        }}>
+        </div>
+        <p style={{
+          color: 'white',
+          fontSize: '16px',
+          fontWeight: '500',
+          margin: '0',
+          textAlign: 'center',
+        }}>Chargement des données...</p>
+        <style>{`
+          @keyframes spin {
+            to { transform: rotate(360deg); }
+          }
+        `}</style>
       </div>
     );
   }
