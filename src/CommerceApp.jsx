@@ -33,12 +33,13 @@ export default function CommerceApp() {
   const [saleForm, setSaleForm] = useState({ product_id: '', quantity: '' });
   const [editingId, setEditingId] = useState(null);
 
+  // Recharger produits et ventes quand l'utilisateur est prêt (après refresh)
   useEffect(() => {
-    if (user && isAccountValid && !profileLoading) {
+    if (user?.id && isAccountValid && !profileLoading) {
       loadProducts();
       loadSales();
     }
-  }, [user, isAccountValid, profileLoading]);
+  }, [user?.id, isAccountValid, profileLoading]);
 
   const loadProducts = async () => {
     if (!user || profileLoading) return;

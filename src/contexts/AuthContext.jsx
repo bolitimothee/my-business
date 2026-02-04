@@ -164,21 +164,30 @@ export function AuthProvider({ children }) {
     const initAuth = async () => {
       try {
         console.log('🔄 Initializing auth...');
-        const { data: sessionData } = await supabase.auth.getSession();
+        let sessionData = await supabase.auth.getSession();
+        
+        // Rafraîchir le JWT si session existante (évite tokens expirés au refresh)
+        if (sessionData.data?.session) {
+          const { data: refreshed } = await supabase.auth.refreshSession();
+          if (refreshed.session) {
+            sessionData = { data: { session: refreshed.session } };
+          }
+          // Si refresh échoue, on garde la session existante (autoRefreshToken gérera)
+        }
         
         if (!isMounted) {
           console.log('⚠️ Component unmounted, ignoring session data');
           return;
         }
 
-        setSession(sessionData.session);
-        setUser(sessionData.session?.user ?? null);
-        console.log('✅ Session check complete:', sessionData.session ? 'Session found' : 'No session');
+        const session = sessionData.data?.session;
+        setSession(session);
+        setUser(session?.user ?? null);
+        console.log('✅ Session check complete:', session ? 'Session found' : 'No session');
 
-        // Charger le profil si on a une session
-        if (sessionData.session?.user) {
-          console.log('📥 Loading profile for user:', sessionData.session.user.id);
-          await loadUserProfile(sessionData.session.user.id, sessionData.session.user.email);
+        if (session?.user) {
+          console.log('📥 Loading profile for user:', session.user.id);
+          await loadUserProfile(session.user.id, session.user.email);
         } else {
           console.log('ℹ️ No session, skipping profile load');
           setProfileLoading(false);
