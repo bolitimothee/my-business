@@ -545,7 +545,7 @@ export default function CommerceApp() {
                   <div className="stats-card revenue-card">
                     <div>
                       <p className="card-label">Chiffre d'Affaires</p>
-                      <p className="card-value revenue">{totalRevenue.toLocaleString('en-US')}</p>
+                      <p className="card-value revenue">{stats.totalRevenue.toLocaleString('en-US')}</p>
                       <p className="card-currency">FCFA</p>
                     </div>
                     <DollarSign size={32} className="card-icon" />
@@ -554,7 +554,7 @@ export default function CommerceApp() {
                   <div className="stats-card profit-card">
                     <div>
                       <p className="card-label">Bénéfice Net</p>
-                      <p className="card-value profit">{totalProfit.toLocaleString('en-US')}</p>
+                      <p className="card-value profit">{stats.totalProfit.toLocaleString('en-US')}</p>
                       <p className="card-currency">FCFA</p>
                     </div>
                     <TrendingUp size={32} className="card-icon" />
@@ -563,7 +563,7 @@ export default function CommerceApp() {
                   <div className="stats-card stock-card">
                     <div>
                       <p className="card-label">Valeur du Stock</p>
-                      <p className="card-value stock">{stockValue.toLocaleString('en-US')}</p>
+                      <p className="card-value stock">{stats.stockValue.toLocaleString('en-US')}</p>
                       <p className="card-currency">FCFA</p>
                     </div>
                     <Package size={32} className="card-icon" />
@@ -888,7 +888,7 @@ export default function CommerceApp() {
                   <div className="finance-card revenue">
                     <div>
                       <p className="finance-label">Chiffre d'Affaires</p>
-                      <p className="finance-amount revenue">{totalRevenue.toLocaleString('en-US')}</p>
+                      <p className="finance-amount revenue">{stats.totalRevenue.toLocaleString('en-US')}</p>
                       <p className="finance-currency">FCFA</p>
                     </div>
                   </div>
@@ -896,7 +896,7 @@ export default function CommerceApp() {
                   <div className="finance-card cost">
                     <div>
                       <p className="finance-label">Coûts Totaux</p>
-                      <p className="finance-amount cost">{totalCost.toLocaleString('en-US')}</p>
+                      <p className="finance-amount cost">{stats.totalCost.toLocaleString('en-US')}</p>
                       <p className="finance-currency">FCFA</p>
                     </div>
                   </div>
@@ -904,7 +904,7 @@ export default function CommerceApp() {
                   <div className="finance-card profit">
                     <div>
                       <p className="finance-label">Bénéfice Net</p>
-                      <p className="finance-amount profit">{totalProfit.toLocaleString('en-US')}</p>
+                      <p className="finance-amount profit">{stats.totalProfit.toLocaleString('en-US')}</p>
                       <p className="finance-currency">FCFA</p>
                     </div>
                   </div>
@@ -917,12 +917,12 @@ export default function CommerceApp() {
                       <div className="detail-item">
                         <span>Marge Bénéficiaire</span>
                         <span className="detail-value profit">
-                          {totalRevenue > 0 ? ((totalProfit / totalRevenue) * 100).toFixed(2) : 0}%
+                          {stats.totalRevenue > 0 ? ((stats.totalProfit / stats.totalRevenue) * 100).toFixed(2) : 0}%
                         </span>
                       </div>
                       <div className="detail-item">
                         <span>Valeur du Stock</span>
-                        <span className="detail-value stock">{stockValue.toLocaleString('en-US')}</span>
+                        <span className="detail-value stock">{stats.stockValue.toLocaleString('en-US')}</span>
                       </div>
                       <div className="detail-item">
                         <span>Produits</span>
