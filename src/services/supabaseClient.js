@@ -20,15 +20,11 @@ if (!supabaseUrl || !supabaseAnonKey) {
   throw new Error('Configuration Supabase manquante');
 }
 
-// Stockage explicite pour garantir la persistance de session après refresh
-const storage = typeof window !== 'undefined' ? window.localStorage : undefined;
-
 export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
   auth: {
     persistSession: true,
     autoRefreshToken: true,
     detectSessionInUrl: true,
-    storage,
   }
 });
 

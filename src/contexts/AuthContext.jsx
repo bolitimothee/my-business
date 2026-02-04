@@ -160,73 +160,30 @@ export function AuthProvider({ children }) {
 
   useEffect(() => {
     let isMounted = true;
+    let initialHandled = false;
 
-    const initAuth = async () => {
-      try {
-        console.log('🔄 Initializing auth...');
-        let sessionData = await supabase.auth.getSession();
-        
-        // Rafraîchir le JWT si session existante (évite tokens expirés au refresh)
-        if (sessionData.data?.session) {
-          const { data: refreshed } = await supabase.auth.refreshSession();
-          if (refreshed.session) {
-            sessionData = { data: { session: refreshed.session } };
-          }
-          // Si refresh échoue, on garde la session existante (autoRefreshToken gérera)
-        }
-        
-        if (!isMounted) {
-          console.log('⚠️ Component unmounted, ignoring session data');
-          return;
-        }
-
-        const session = sessionData.data?.session;
-        setSession(session);
-        setUser(session?.user ?? null);
-        console.log('✅ Session check complete:', session ? 'Session found' : 'No session');
-
-        if (session?.user) {
-          console.log('📥 Loading profile for user:', session.user.id);
-          await loadUserProfile(session.user.id, session.user.email);
-        } else {
-          console.log('ℹ️ No session, skipping profile load');
-          setProfileLoading(false);
-        }
-      } catch (err) {
-        console.error('❌ Init auth error:', err);
-        setProfileLoading(false);
-      } finally {
-        if (isMounted) {
-          setLoading(false);
-          console.log('✅ Init complete');
-        }
-      }
-    };
-
-    // Timeout global pour initAuth - utiliser une durée plus longue
-    initTimeoutRef.current = setTimeout(() => {
-      if (isMounted) {
-        console.warn(`⏰ Init timeout après ${INIT_TIMEOUT}ms`);
-        setLoading(false);
-        setProfileLoading(false);
-      }
-    }, INIT_TIMEOUT);
-
-    initAuth();
-
-    // Listener pour les changements d'auth
-    const { data: authListener } = supabase.auth.onAuthStateChange(async (event, session) => {
+    const handleAuthEvent = async (event, session) => {
       if (!isMounted) return;
 
-      console.log('🔐 Auth state changed:', event);
+      console.log('🔐 Auth event:', event);
+
+      // Au refresh, rafraîchir le JWT pour éviter token expiré
+      if (event === 'INITIAL_SESSION' && session?.user) {
+        try {
+          const { data } = await supabase.auth.refreshSession();
+          if (data?.session) session = data.session;
+        } catch (e) {
+          console.warn('Refresh session:', e);
+        }
+      }
+
       setSession(session);
       setUser(session?.user ?? null);
 
       if (session?.user) {
-        console.log('📥 Loading profile due to auth change');
+        setProfileLoading(true);
         await loadUserProfile(session.user.id, session.user.email);
       } else {
-        console.log('ℹ️ No session in auth change event');
         setUserProfile(null);
         setIsAccountValid(true);
         setProfileLoading(false);
@@ -235,19 +192,50 @@ export function AuthProvider({ children }) {
           profileTimeoutRef.current = null;
         }
       }
-    });
+
+      if (!initialHandled) {
+        initialHandled = true;
+        setLoading(false);
+        console.log('✅ Initial auth state resolved');
+      }
+    };
+
+    // PRIORITÉ: onAuthStateChange pour récupérer la session au refresh
+    const { data: authListener } = supabase.auth.onAuthStateChange(handleAuthEvent);
+
+    // Fallback: getSession si pas d'événement après 2s
+    const fallbackTimer = setTimeout(async () => {
+      if (initialHandled) return;
+      try {
+        const { data } = await supabase.auth.getSession();
+        if (isMounted && data?.session) {
+          await handleAuthEvent('FALLBACK_SESSION', data.session);
+        }
+        if (isMounted && !initialHandled) {
+          initialHandled = true;
+          setLoading(false);
+        }
+      } catch {
+        if (isMounted && !initialHandled) {
+          initialHandled = true;
+          setLoading(false);
+        }
+      }
+    }, 2000);
+
+    initTimeoutRef.current = setTimeout(() => {
+      if (isMounted && !initialHandled) {
+        initialHandled = true;
+        setLoading(false);
+        setProfileLoading(false);
+      }
+    }, INIT_TIMEOUT);
 
     return () => {
-      console.log('🧹 Cleaning up auth effect');
       isMounted = false;
-      
-      // Nettoyer tous les timeouts
-      if (profileTimeoutRef.current) {
-        clearTimeout(profileTimeoutRef.current);
-      }
-      if (initTimeoutRef.current) {
-        clearTimeout(initTimeoutRef.current);
-      }
+      clearTimeout(fallbackTimer);
+      if (profileTimeoutRef.current) clearTimeout(profileTimeoutRef.current);
+      if (initTimeoutRef.current) clearTimeout(initTimeoutRef.current);
       authListener?.subscription.unsubscribe();
     };
   }, []);
@@ -321,34 +309,25 @@ export function AuthProvider({ children }) {
     try {
       console.log('👋 Signing out...');
       setError(null);
-      const { error: signOutError } = await supabase.auth.signOut();
-      if (signOutError) throw signOutError;
+      await supabase.auth.signOut({ scope: 'global' });
       
-      // Nettoyer les states IMMÉDIATEMENT
-      setLoading(false);  // ← IMPORTANT: Reset loading state
       setSession(null);
       setUser(null);
       setUserProfile(null);
-      setIsAccountValid(false);
+      setIsAccountValid(true);
       setProfileLoading(false);
-      setError(null);
+      setLoading(false);
       
-      // Nettoyer les timeouts
-      if (profileTimeoutRef.current) {
-        clearTimeout(profileTimeoutRef.current);
-        profileTimeoutRef.current = null;
-      }
-      if (initTimeoutRef.current) {
-        clearTimeout(initTimeoutRef.current);
-        initTimeoutRef.current = null;
-      }
-      
-      console.log('✅ Signout successful - All states reset');
+      // Forcer le rechargement pour état propre (évite bugs après refresh)
+      window.location.href = '/';
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Signout error';
       console.error('❌ Signout error:', message);
       setError(message);
-      throw err;
+      // Même en erreur, forcer le reset
+      setSession(null);
+      setUser(null);
+      window.location.href = '/';
     }
   };
 

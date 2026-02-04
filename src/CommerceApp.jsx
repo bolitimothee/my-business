@@ -1,8 +1,10 @@
 import React, { useState, useEffect } from 'react';
-import { PlusCircle, Package, TrendingUp, DollarSign, ShoppingCart, Edit2, Trash2, BarChart3, Download, Mail, MessageCircle, X, Menu, Shield, LogOut } from 'lucide-react';
+import { PlusCircle, Package, TrendingUp, DollarSign, ShoppingCart, Edit2, Trash2, BarChart3, Download, Mail, MessageCircle, X, Menu, Shield, LogOut, AlertTriangle } from 'lucide-react';
 import { useAuth } from './contexts/AuthContext';
 import AdminPanel from './components/admin/AdminPanel';
 import { supabase } from './services/supabaseClient';
+import { salePersistenceService } from './services/salePersistenceService';
+import { useSaleSync } from './services/useSaleSync';
 import './styles/Navigation.css';
 import './styles/Dashboard.css';
 import './styles/StockManager.css';
@@ -32,6 +34,19 @@ export default function CommerceApp() {
   });
   const [saleForm, setSaleForm] = useState({ product_id: '', quantity: '' });
   const [editingId, setEditingId] = useState(null);
+  const [queueStats, setQueueStats] = useState(null);
+  const [syncStatus, setSyncStatus] = useState(null);
+
+  // Hook pour gérer la synchronisation automatique
+  const { processPendingSales, getQueueStats } = useSaleSync(user, (result) => {
+    console.log('🔄 Sync complète:', result);
+    // Recharger les données après sync
+    if (user && isAccountValid && !profileLoading) {
+      loadProducts();
+      loadSales();
+    }
+    updateQueueStats();
+  });
 
   // Recharger produits et ventes quand l'utilisateur est prêt (après refresh)
   useEffect(() => {
@@ -40,7 +55,19 @@ export default function CommerceApp() {
       loadSales();
     }
   }, [user?.id, isAccountValid, profileLoading]);
+  // Mettre à jour les stats de la queue
+  const updateQueueStats = () => {
+    const stats = getQueueStats();
+    setQueueStats(stats);
+    setSyncStatus(salePersistenceService.getSyncStatus());
+  };
 
+  // Mettre à jour les stats tous les 5 secondes
+  useEffect(() => {
+    updateQueueStats();
+    const interval = setInterval(updateQueueStats, 5000);
+    return () => clearInterval(interval);
+  }, []);
   const loadProducts = async () => {
     if (!user || profileLoading) return;
     setAppLoading(true);
@@ -170,7 +197,20 @@ export default function CommerceApp() {
         return;
       }
 
-      // RPC transactionnelle : vente + mise à jour stock en une seule opération atomique
+      // 1️⃣ SAUVEGARDER LOCALEMENT D'ABORD (avant d'envoyer à Supabase)
+      const saleData = {
+        product_id: product.id,
+        quantity: quantity,
+        product_name: product.name,
+        sale_price: Number(product.sale_price),
+        cost_price: Number(product.cost_price),
+      };
+      
+      const pendingSaleId = salePersistenceService.addPendingSale(saleData);
+      console.log('💾 Vente sauvegardée localement avec ID:', pendingSaleId);
+      updateQueueStats();
+
+      // 2️⃣ RPC transactionnelle : vente + mise à jour stock en une seule opération atomique
       const { data, error: rpcError } = await supabase.rpc('process_sale', {
         p_product_id: product.id,
         p_quantity: quantity,
@@ -181,14 +221,25 @@ export default function CommerceApp() {
 
       if (rpcError) {
         console.error('❌ Erreur process_sale:', rpcError);
+        // Marquer comme échoué mais garder en queue pour retry
+        salePersistenceService.markAsFailed(pendingSaleId, rpcError);
+        updateQueueStats();
         throw rpcError;
       }
 
       if (data && !data.success) {
-        throw new Error(data.error || 'Erreur lors de la vente');
+        const err = new Error(data.error || 'Erreur lors de la vente');
+        console.error('❌ RPC échouée:', data.error);
+        salePersistenceService.markAsFailed(pendingSaleId, err);
+        updateQueueStats();
+        throw err;
       }
 
       console.log('✅ Vente enregistrée et stock mis à jour');
+      
+      // 3️⃣ MARQUER COMME SYNCHRONISÉE en local
+      salePersistenceService.markAsSynced(pendingSaleId);
+      updateQueueStats();
 
       setSaleForm({ product_id: '', quantity: '' });
       await loadProducts();
@@ -197,7 +248,7 @@ export default function CommerceApp() {
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Erreur inconnue';
       console.error('🔴 handleSale Error:', message);
-      setError(`❌ Erreur: ${message}`);
+      setError(`❌ Erreur: ${message} (sauvegardée en attente de resynchronisation)`);
     }
   };
 
@@ -379,6 +430,13 @@ export default function CommerceApp() {
             <p className="header-email">Connecté : {userProfile?.email ?? user?.email ?? '—'}</p>
           </div>
           <div className="header-actions">
+            {/* Indicateur de Queue de Synchronisation */}
+            {queueStats && (queueStats.pending > 0 || queueStats.failed > 0) && (
+              <div className="queue-indicator" title={`${queueStats.pending} en attente, ${queueStats.failed} échouées`}>
+                <AlertTriangle size={20} style={{ color: '#ff9800' }} />
+                <span className="queue-badge">{queueStats.pending + queueStats.failed}</span>
+              </div>
+            )}
             {userProfile?.role === 'admin' && (
               <button
                 onClick={() => setShowAdminPanel(true)}
