@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { PlusCircle, Package, TrendingUp, DollarSign, ShoppingCart, Edit2, Trash2, BarChart3, Download, Mail, MessageCircle, X, Menu, Shield, LogOut, AlertTriangle } from 'lucide-react';
 import { useAuth } from './contexts/AuthContext';
 import AdminPanel from './components/admin/AdminPanel';
@@ -37,110 +37,116 @@ export default function CommerceApp() {
   const [queueStats, setQueueStats] = useState(null);
   const [syncStatus, setSyncStatus] = useState(null);
 
-  // Hook pour gérer la synchronisation automatique
-  const { processPendingSales, getQueueStats } = useSaleSync(user, (result) => {
-    console.log('🔄 Sync complète:', result);
-    // Recharger les données après sync
+  // Initialiser le hook de sync
+  const { processPendingSales, getQueueStats } = useSaleSync(user, useCallback((result) => {
+    console.log('✨ Sync complète:', result);
     if (user && isAccountValid && !profileLoading) {
       loadProducts();
       loadSales();
     }
-    updateQueueStats();
-  });
+  }, [user, isAccountValid, profileLoading]));
 
-  // Recharger produits et ventes quand l'utilisateur est prêt (après refresh)
+  // Fonction pour mettre à jour les stats de la queue
+  const updateQueueStats = useCallback(() => {
+    const stats = getQueueStats();
+    setQueueStats(stats);
+  }, [getQueueStats]);
+
+  // Charger les produits et ventes au démarrage
   useEffect(() => {
     if (user?.id && isAccountValid && !profileLoading) {
       loadProducts();
       loadSales();
     }
-  }, [user?.id, isAccountValid, profileLoading]);
-  // Mettre à jour les stats de la queue
-  const updateQueueStats = () => {
-    const stats = getQueueStats();
-    setQueueStats(stats);
-    setSyncStatus(salePersistenceService.getSyncStatus());
-  };
+  }, [user?.id, isAccountValid, profileLoading, loadProducts, loadSales]);
 
-  // Mettre à jour les stats tous les 5 secondes
+  // Mettre à jour les stats de la queue tous les 5 secondes
   useEffect(() => {
     updateQueueStats();
     const interval = setInterval(updateQueueStats, 5000);
     return () => clearInterval(interval);
-  }, []);
-  const loadProducts = async () => {
+  }, [getQueueStats]);
+  const loadProducts = useCallback(async () => {
     if (!user || profileLoading) return;
     setAppLoading(true);
     setError(null);
     try {
-      console.log('📥 Chargement produits pour user:', user.id);
       const { data, error: fetchError } = await supabase
         .from('products')
         .select('*')
         .eq('user_id', user.id)
         .order('created_at', { ascending: false });
-      if (fetchError) {
-        console.error('❌ Erreur fetch produits:', fetchError);
-        throw fetchError;
-      }
-      console.log('✅ Produits chargés:', data?.length || 0);
+      
+      if (fetchError) throw fetchError;
       setProducts(data || []);
       setError(null);
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Erreur inconnue';
-      console.error('🔴 loadProducts Error:', message);
       setError(`❌ Erreur chargement: ${message}`);
     } finally {
       setAppLoading(false);
     }
-  };
+  }, [user, profileLoading]);
 
-  const loadSales = async () => {
+  // Charger et fusionner les ventes avec useMemo pour éviter les recalculs
+  const mergedSales = useMemo(() => {
+    // Ventes depuis Supabase
+    let allSales = [...sales];
+
+    // Ajouter les ventes en attente depuis localStorage
+    const pendingSales = salePersistenceService.getPendingSales();
+    const displayPendingSales = pendingSales
+      .filter(s => s.status !== 'completed')
+      .map(s => ({
+        ...s,
+        sale_date: s.createdAt,
+        is_pending: true,
+        sale_status: s.status,
+      }));
+
+    // Fusionner et trier
+    return [...displayPendingSales, ...allSales].sort((a, b) => {
+      const dateA = new Date(a.sale_date || a.createdAt).getTime();
+      const dateB = new Date(b.sale_date || b.createdAt).getTime();
+      return dateB - dateA;
+    });
+  }, [sales]);
+
+  // Calculer les statistiques avec useMemo
+  const stats = useMemo(() => {
+    const totalRevenue = mergedSales.reduce(
+      (sum, sale) => sum + Number(sale.total_price || (sale.sale_price * sale.quantity)), 
+      0
+    );
+    const totalCost = mergedSales.reduce(
+      (sum, sale) => sum + (Number(sale.cost_price) * sale.quantity), 
+      0
+    );
+    const totalProfit = totalRevenue - totalCost;
+    const stockValue = products.reduce(
+      (sum, p) => sum + (Number(p.cost_price) * p.quantity), 
+      0
+    );
+
+    return { totalRevenue, totalCost, totalProfit, stockValue };
+  }, [mergedSales, products]);
+
+  const loadSales = useCallback(async () => {
     if (!user) return;
     try {
-      console.log('📥 Chargement ventes pour user:', user.id);
       const { data, error: fetchError } = await supabase
         .from('sales')
         .select('*')
         .eq('user_id', user.id)
         .order('sale_date', { ascending: false });
-      if (fetchError) {
-        console.error('❌ Erreur fetch ventes:', fetchError);
-        throw fetchError;
-      }
       
-      // 1️⃣ Ventes depuis Supabase
-      let allSales = data || [];
-      console.log('✅ Ventes Supabase chargées:', allSales.length);
-
-      // 2️⃣ Ventes en attente depuis localStorage
-      const pendingSales = salePersistenceService.getPendingSales();
-      const displayPendingSales = pendingSales
-        .filter(s => s.status !== 'completed') // Pas les complétées (déjà dans Supabase)
-        .map(s => ({
-          ...s,
-          id: s.id, // ID temporaire du localStorage
-          sale_date: s.createdAt, // Utiliser createdAt pour le tri
-          is_pending: true, // Marqueur pour les styles
-          sale_status: s.status, // Afficher le statut
-        }));
-
-      console.log('📋 Ventes en attente depuis queue:', displayPendingSales.length);
-
-      // 3️⃣ Fusionner et trier
-      allSales = [...displayPendingSales, ...allSales].sort((a, b) => {
-        const dateA = new Date(a.sale_date || a.createdAt).getTime();
-        const dateB = new Date(b.sale_date || b.createdAt).getTime();
-        return dateB - dateA; // Trier par date décroissante
-      });
-
-      console.log('📊 Total ventes affichées (Supabase + queue):', allSales.length);
-      setSales(allSales);
+      if (fetchError) throw fetchError;
+      setSales(data || []);
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Erreur inconnue';
       console.error('🔴 loadSales Error:', message);
     }
-  };
+  }, [user]);
 
   const handleAddProduct = async () => {
     if (!user) {
@@ -310,21 +316,16 @@ export default function CommerceApp() {
     setShowMenu(false);
   };
 
-  const totalRevenue = sales.reduce((sum, sale) => sum + Number(sale.total_price), 0);
-  const totalCost = sales.reduce((sum, sale) => sum + (Number(sale.cost_price) * sale.quantity), 0);
-  const totalProfit = totalRevenue - totalCost;
-  const stockValue = products.reduce((sum, p) => sum + (Number(p.cost_price) * p.quantity), 0);
-
   const generateSalesReport = () => {
     let report = "RAPPORT DES VENTES\n";
     report += "==========================================\n\n";
     report += `Date: ${new Date().toLocaleDateString('fr-FR')}\n\n`;
     report += "RÉSUMÉ FINANCIER\n";
     report += "----------------\n";
-    report += `Chiffre d'affaires: ${totalRevenue.toLocaleString('en-US')} FCFA\n`;
-    report += `Coûts totaux: ${totalCost.toLocaleString('en-US')} FCFA\n`;
-    report += `Bénéfice net: ${totalProfit.toLocaleString('en-US')} FCFA\n`;
-    report += `Marge: ${totalRevenue > 0 ? ((totalProfit / totalRevenue) * 100).toFixed(2) : 0}%\n\n`;
+    report += `Chiffre d'affaires: ${stats.totalRevenue.toLocaleString('en-US')} FCFA\n`;
+    report += `Coûts totaux: ${stats.totalCost.toLocaleString('en-US')} FCFA\n`;
+    report += `Bénéfice net: ${stats.totalProfit.toLocaleString('en-US')} FCFA\n`;
+    report += `Marge: ${stats.totalRevenue > 0 ? ((stats.totalProfit / stats.totalRevenue) * 100).toFixed(2) : 0}%\n\n`;
     report += "DÉTAIL DES VENTES\n";
     report += "----------------\n\n";
 

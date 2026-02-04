@@ -45,6 +45,23 @@ export const salePersistenceService = {
   },
 
   /**
+   * Marquer une vente comme en cours de synchronisation
+   */
+  markAssyncing(saleId) {
+    try {
+      const pending = this.getPendingSales();
+      const updated = pending.map(sale =>
+        sale.id === saleId
+          ? { ...sale, status: 'syncing' }
+          : sale
+      );
+      localStorage.setItem(PENDING_SALES_KEY, JSON.stringify(updated));
+    } catch (err) {
+      console.error('❌ Erreur marquage syncing:', err);
+    }
+  },
+
+  /**
    * Marquer une vente comme synchronisée
    */
   markAsSynced(saleId) {

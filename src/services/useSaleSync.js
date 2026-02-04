@@ -9,12 +9,21 @@ import { salePersistenceService } from './salePersistenceService';
 
 export function useSaleSync(user, onSyncComplete) {
   const syncInProgressRef = useRef(false);
+  const lastSyncTimeRef = useRef(0);
+  const MIN_SYNC_INTERVAL = 5000; // Min 5s entre les syncs
 
   const processPendingSales = useCallback(async () => {
+    // Vérifications de précondition
     if (!user || syncInProgressRef.current) {
-      console.log('⏭️ Synchronisation sautée: pas d\'utilisateur ou sync déjà en cours');
       return;
     }
+
+    // Éviter les syncs trop rapides (debounce)
+    const now = Date.now();
+    if (now - lastSyncTimeRef.current < MIN_SYNC_INTERVAL) {
+      return;
+    }
+    lastSyncTimeRef.current = now;
 
     syncInProgressRef.current = true;
     salePersistenceService.setSyncStatus({ syncing: true });
@@ -23,28 +32,22 @@ export function useSaleSync(user, onSyncComplete) {
       const pendingSales = salePersistenceService.getPendingSalesToRetry();
 
       if (pendingSales.length === 0) {
-        console.log('✅ Aucune vente à synchroniser');
-        salePersistenceService.setSyncStatus({ syncing: false, lastSync: new Date().toISOString() });
+        salePersistenceService.setSyncStatus({
+          syncing: false,
+          lastSync: new Date().toISOString(),
+        });
         return;
       }
 
-      console.log(`📤 Synchronisation de ${pendingSales.length} vente(s) en attente...`);
+      console.log(`📤 Synchronisation de ${pendingSales.length} vente(s)...`);
 
       let successCount = 0;
       let failureCount = 0;
 
       for (const sale of pendingSales) {
         try {
-          console.log(`🔄 Synchronisation vente ${sale.id}...`);
-
-          // Marquer comme "syncing"
-          salePersistenceService.getPendingSales();
-          const pending = salePersistenceService.getPendingSales();
-          const pendingIndex = pending.findIndex(s => s.id === sale.id);
-          if (pendingIndex !== -1) {
-            pending[pendingIndex].status = 'syncing';
-            localStorage.setItem('pending_sales_queue', JSON.stringify(pending));
-          }
+          // Mettre à jour le statut avant d'envoyer
+          salePersistenceService.markAssyncing(sale.id);
 
           // Appeler la fonction RPC
           const { data, error: rpcError } = await supabase.rpc('process_sale', {
@@ -55,32 +58,25 @@ export function useSaleSync(user, onSyncComplete) {
             p_cost_price: sale.cost_price,
           });
 
-          if (rpcError) {
-            console.error('❌ Erreur RPC pour vente', sale.id, ':', rpcError);
-            salePersistenceService.markAsFailed(sale.id, rpcError);
+          if (rpcError || (data && !data.success)) {
+            const errorMsg = rpcError?.message || data?.error || 'Erreur inconnue';
+            console.warn(`⚠️ Erreur vente ${sale.id}: ${errorMsg}`);
+            salePersistenceService.markAsFailed(sale.id, new Error(errorMsg));
             failureCount++;
             continue;
           }
 
-          if (data && !data.success) {
-            const error = new Error(data.error || 'Erreur RPC');
-            console.error('❌ RPC retourné false:', data.error);
-            salePersistenceService.markAsFailed(sale.id, error);
-            failureCount++;
-            continue;
-          }
-
-          console.log('✅ Vente synchronisée avec succès:', sale.id);
+          console.log(`✅ Vente ${sale.id} synchronisée`);
           salePersistenceService.markAsSynced(sale.id);
           successCount++;
         } catch (err) {
-          console.error('❌ Erreur traitement vente', sale.id, ':', err);
+          console.error(`❌ Erreur traitement ${sale.id}:`, err?.message);
           salePersistenceService.markAsFailed(sale.id, err);
           failureCount++;
         }
       }
 
-      console.log(`📊 Synchronisation terminée: ${successCount} OK, ${failureCount} erreurs`);
+      console.log(`✨ Sync terminée: ${successCount} OK, ${failureCount} erreurs`);
       salePersistenceService.setSyncStatus({
         syncing: false,
         lastSync: new Date().toISOString(),
@@ -90,23 +86,25 @@ export function useSaleSync(user, onSyncComplete) {
       // Nettoyer les ventes complétées
       salePersistenceService.cleanupCompletedSales();
 
-      // Callback pour notifier le parent
+      // Notifier le parent
       if (onSyncComplete) {
         onSyncComplete({ successCount, failureCount });
       }
     } catch (err) {
-      console.error('❌ Erreur grave lors de la synchronisation:', err);
-      salePersistenceService.setSyncStatus({ syncing: false, lastError: err.message });
+      console.error('❌ Erreur synchronisation:', err?.message);
+      salePersistenceService.setSyncStatus({
+        syncing: false,
+        lastError: err?.message,
+      });
     } finally {
       syncInProgressRef.current = false;
     }
   }, [user, onSyncComplete]);
 
-  // Synchroniser au démarrage et quand l'utilisateur se reconnecte
+  // Synchroniser au démarrage
   useEffect(() => {
     if (!user) return;
 
-    // Attendre un peu pour que l'app soit stable
     const timer = setTimeout(() => {
       processPendingSales();
     }, 1000);
@@ -114,17 +112,16 @@ export function useSaleSync(user, onSyncComplete) {
     return () => clearTimeout(timer);
   }, [user, processPendingSales]);
 
-  // Synchroniser régulièrement (chaque 30 secondes)
+  // Synchroniser régulièrement (30 secondes)
   useEffect(() => {
     if (!user) return;
 
     const interval = setInterval(() => {
       const stats = salePersistenceService.getQueueStats();
       if (stats.pending > 0 || stats.failed > 0) {
-        console.log('🔄 Tentative de synchronisation périodique...');
         processPendingSales();
       }
-    }, 30000); // Toutes les 30 secondes
+    }, 30000);
 
     return () => clearInterval(interval);
   }, [user, processPendingSales]);
