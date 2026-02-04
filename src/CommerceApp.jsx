@@ -169,37 +169,25 @@ export default function CommerceApp() {
         return;
       }
 
-      const saleDate = new Date().toISOString();
-      
-      console.log('💰 Enregistrement de vente:', { product_id: product.id, quantity });
-      const { error: insertError } = await supabase
-        .from('sales')
-        .insert({
-          user_id: user.id,
-          product_id: product.id,
-          product_name: product.name,
-          quantity,
-          total_price: product.sale_price * quantity,
-          cost_price: product.cost_price,
-          sale_date: saleDate,
-        });
-      if (insertError) {
-        console.error('❌ Erreur insertion vente:', insertError);
-        throw insertError;
-      }
-      console.log('✅ Vente enregistrée');
+      // RPC transactionnelle : vente + mise à jour stock en une seule opération atomique
+      const { data, error: rpcError } = await supabase.rpc('process_sale', {
+        p_product_id: product.id,
+        p_quantity: quantity,
+        p_product_name: product.name,
+        p_sale_price: Number(product.sale_price),
+        p_cost_price: Number(product.cost_price),
+      });
 
-      console.log('📦 Mise à jour stock');
-      const { error: updateError } = await supabase
-        .from('products')
-        .update({ quantity: product.quantity - quantity })
-        .eq('id', product.id)
-        .eq('user_id', user.id);
-      if (updateError) {
-        console.error('❌ Erreur mise à jour stock:', updateError);
-        throw updateError;
+      if (rpcError) {
+        console.error('❌ Erreur process_sale:', rpcError);
+        throw rpcError;
       }
-      console.log('✅ Stock mis à jour');
+
+      if (data && !data.success) {
+        throw new Error(data.error || 'Erreur lors de la vente');
+      }
+
+      console.log('✅ Vente enregistrée et stock mis à jour');
 
       setSaleForm({ product_id: '', quantity: '' });
       await loadProducts();
@@ -387,7 +375,7 @@ export default function CommerceApp() {
           <div>
             <h1 className="header-title">Gestion de Commerce</h1>
             <p className="header-subtitle">Système de gestion des stocks et finances</p>
-            <p className="header-email">Connecté : {userProfile?.email}</p>
+            <p className="header-email">Connecté : {userProfile?.email ?? user?.email ?? '—'}</p>
           </div>
           <div className="header-actions">
             {userProfile?.role === 'admin' && (

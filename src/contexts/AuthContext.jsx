@@ -3,8 +3,8 @@ import { supabase } from '../services/supabaseClient';
 
 const AuthContext = createContext(undefined);
 
-const PROFILE_LOAD_TIMEOUT = 5000;  // 5 secondes
-const INIT_TIMEOUT = 3000;          // 3 secondes
+const PROFILE_LOAD_TIMEOUT = 8000;  // 8 secondes (réseau lent)
+const INIT_TIMEOUT = 6000;          // 6 secondes (getSession peut être lent)
 
 export function AuthProvider({ children }) {
   const [session, setSession] = useState(null);
@@ -15,10 +15,10 @@ export function AuthProvider({ children }) {
   const [error, setError] = useState(null);
   const [isAccountValid, setIsAccountValid] = useState(true);
   
-  // Refs pour tracker les timeouts actifs
+  // Refs pour tracker les timeouts actifs et éviter les race conditions
   const profileTimeoutRef = useRef(null);
   const initTimeoutRef = useRef(null);
-  const loadProfileAbortRef = useRef(null);
+  const profileLoadIdRef = useRef(0);
 
   const checkAccountStatus = (profile) => {
     // Vérifier si le compte est désactivé
@@ -67,45 +67,46 @@ export function AuthProvider({ children }) {
     }
   };
 
-  const loadUserProfile = async (userId) => {
+  const loadUserProfile = async (userId, userEmail = '') => {
     if (!userId) {
       console.warn('❌ No userId provided to loadUserProfile');
       setProfileLoading(false);
       return;
     }
 
+    const loadId = ++profileLoadIdRef.current;
     setProfileLoading(true);
     
     // Timeout de sécurité pour le chargement du profil
     profileTimeoutRef.current = setTimeout(() => {
       console.warn(`⏰ Profile loading timeout après ${PROFILE_LOAD_TIMEOUT}ms pour user ${userId}`);
-      setProfileLoading(false);
-      setIsAccountValid(true); // Permettre l'accès même si le profil traîne
+      if (loadId === profileLoadIdRef.current) {
+        setProfileLoading(false);
+        setIsAccountValid(true);
+      }
     }, PROFILE_LOAD_TIMEOUT);
 
     try {
-      // Essayer de charger le profil
       const { data, error: fetchError } = await supabase
         .from('user_profiles')
         .select('*')
         .eq('user_id', userId);
 
-      // Gérer les erreurs RLS/500
+      if (loadId !== profileLoadIdRef.current) return;
+
       if (fetchError) {
         console.warn('⚠️ Profile fetch error (RLS/500):', fetchError.message);
-        // Ne pas bloquer, créer un profil par défaut
         throw new Error('RLS_ERROR');
       }
 
       if (data && data.length > 0) {
-        console.log('✅ Profile loaded successfully');
         setUserProfile(data[0]);
         setIsAccountValid(checkAccountStatus(data[0]));
       } else {
-        // Profil n'existe pas, créer un par défaut
         console.warn('⚠️ Profile not found, creating default...');
         const defaultProfile = {
           user_id: userId,
+          email: userEmail || '',
           role: 'user',
           is_active: true,
           created_at: new Date().toISOString(),
@@ -114,30 +115,32 @@ export function AuthProvider({ children }) {
         try {
           const { data: insertedData, error: insertError } = await supabase
             .from('user_profiles')
-            .insert([defaultProfile])
+            .insert([{ ...defaultProfile, email: userEmail || 'inconnu@temp.local' }])
             .select()
             .single();
           
+          if (loadId !== profileLoadIdRef.current) return;
+          
           if (insertError) {
             console.warn('⚠️ Could not create profile in DB (RLS issue):', insertError.message);
-            // Utiliser le profil en mémoire même si l'insert échoue
             setUserProfile(defaultProfile);
             setIsAccountValid(true);
           } else {
-            console.log('✅ Default profile created in DB');
             setUserProfile(insertedData);
             setIsAccountValid(true);
           }
         } catch (insertErr) {
-          console.warn('⚠️ Insert error:', insertErr);
+          if (loadId !== profileLoadIdRef.current) return;
           setUserProfile(defaultProfile);
           setIsAccountValid(true);
         }
       }
     } catch (err) {
+      if (loadId !== profileLoadIdRef.current) return;
       console.warn('⚠️ Error loading profile - using default:', err instanceof Error ? err.message : err);
       const defaultProfile = {
         user_id: userId,
+        email: userEmail || '',
         role: 'user',
         is_active: true,
         created_at: new Date().toISOString(),
@@ -145,12 +148,13 @@ export function AuthProvider({ children }) {
       setUserProfile(defaultProfile);
       setIsAccountValid(true);
     } finally {
-      // Nettoyer le timeout
       if (profileTimeoutRef.current) {
         clearTimeout(profileTimeoutRef.current);
         profileTimeoutRef.current = null;
       }
-      setProfileLoading(false);
+      if (loadId === profileLoadIdRef.current) {
+        setProfileLoading(false);
+      }
     }
   };
 
@@ -174,7 +178,7 @@ export function AuthProvider({ children }) {
         // Charger le profil si on a une session
         if (sessionData.session?.user) {
           console.log('📥 Loading profile for user:', sessionData.session.user.id);
-          await loadUserProfile(sessionData.session.user.id);
+          await loadUserProfile(sessionData.session.user.id, sessionData.session.user.email);
         } else {
           console.log('ℹ️ No session, skipping profile load');
           setProfileLoading(false);
@@ -211,11 +215,11 @@ export function AuthProvider({ children }) {
 
       if (session?.user) {
         console.log('📥 Loading profile due to auth change');
-        await loadUserProfile(session.user.id);
+        await loadUserProfile(session.user.id, session.user.email);
       } else {
         console.log('ℹ️ No session in auth change event');
         setUserProfile(null);
-        setIsAccountValid(false);
+        setIsAccountValid(true);
         setProfileLoading(false);
         if (profileTimeoutRef.current) {
           clearTimeout(profileTimeoutRef.current);
@@ -274,15 +278,8 @@ export function AuthProvider({ children }) {
       const { data, error: signUpError } = await supabase.auth.signUp({ email, password });
       if (signUpError) throw signUpError;
 
-      if (data.user) {
-        const { error: profileError } = await supabase.from('user_profiles').insert({
-          user_id: data.user.id,
-          email,
-          role: 'user',
-          is_active: true,
-        });
-        if (profileError) throw profileError;
-      }
+      // Le profil est créé automatiquement par le trigger handle_new_user sur auth.users
+      // Pas d'insertion manuelle ici pour éviter la violation UNIQUE(user_id)
       console.log('✅ Signup successful');
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Signup error';
@@ -300,7 +297,7 @@ export function AuthProvider({ children }) {
       if (signInError) throw signInError;
 
       if (data.user) {
-        await loadUserProfile(data.user.id);
+        await loadUserProfile(data.user.id, data.user.email);
       }
       console.log('✅ Signin successful');
     } catch (err) {
