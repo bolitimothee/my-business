@@ -13,7 +13,7 @@ import './styles/FinanceReport.css';
 import './styles/ExportModal.css';
 import './styles/CommerceApp.css';
 
-export default function CommerceApp({ onDataReady }) {
+export default function CommerceApp() {
   const { user, userProfile, signOut, isAccountValid, profileLoading, loading } = useAuth();
   const [activeTab, setActiveTab] = useState('dashboard');
   const [showMenu, setShowMenu] = useState(false);
@@ -25,7 +25,6 @@ export default function CommerceApp({ onDataReady }) {
   const [sales, setSales] = useState([]);
   const [appLoading, setAppLoading] = useState(true);
   const [error, setError] = useState(null);
-  const [dataInitialized, setDataInitialized] = useState(false);
   const [formData, setFormData] = useState({
     name: '',
     quantity: 0,
@@ -51,42 +50,10 @@ export default function CommerceApp({ onDataReady }) {
 
   // Recharger produits et ventes quand l'utilisateur est prêt (après refresh)
   useEffect(() => {
-    if (!user?.id || !isAccountValid || profileLoading) return;
-
-    console.log('🚀 Début initialisation des données de l\'app');
-    setAppLoading(true);
-
-    // Étape 1: Synchroniser d'abord les ventes en attente
-    const initializeData = async () => {
-      try {
-        console.log('📤 [Étape 1] Synchronisation des ventes en attente...');
-        await processPendingSales();
-        
-        console.log('📥 [Étape 2] Chargement des produits...');
-        await loadProducts();
-        
-        console.log('📥 [Étape 3] Chargement des ventes...');
-        await loadSales();
-        
-        console.log('✅ [Complète] Toutes les données sont chargées');
-        setDataInitialized(true);
-        setAppLoading(false);
-        
-        // Notifier AppWrapper que les données sont prêtes
-        if (onDataReady) {
-          setTimeout(() => onDataReady(), 300);
-        }
-      } catch (err) {
-        console.error('🔴 Erreur lors de l\'initialisation:', err);
-        setAppLoading(false);
-        setDataInitialized(true); // Continuer même s'il y a une erreur
-        if (onDataReady) {
-          setTimeout(() => onDataReady(), 300);
-        }
-      }
-    };
-
-    initializeData();
+    if (user?.id && isAccountValid && !profileLoading) {
+      loadProducts();
+      loadSales();
+    }
   }, [user?.id, isAccountValid, profileLoading]);
   // Mettre à jour les stats de la queue
   const updateQueueStats = () => {
@@ -103,6 +70,8 @@ export default function CommerceApp({ onDataReady }) {
   }, []);
   const loadProducts = async () => {
     if (!user || profileLoading) return;
+    setAppLoading(true);
+    setError(null);
     try {
       console.log('📥 Chargement produits pour user:', user.id);
       const { data, error: fetchError } = await supabase
@@ -121,6 +90,8 @@ export default function CommerceApp({ onDataReady }) {
       const message = err instanceof Error ? err.message : 'Erreur inconnue';
       console.error('🔴 loadProducts Error:', message);
       setError(`❌ Erreur chargement: ${message}`);
+    } finally {
+      setAppLoading(false);
     }
   };
 
@@ -137,8 +108,34 @@ export default function CommerceApp({ onDataReady }) {
         console.error('❌ Erreur fetch ventes:', fetchError);
         throw fetchError;
       }
-      console.log('✅ Ventes chargées:', data?.length || 0);
-      setSales(data || []);
+      
+      // 1️⃣ Ventes depuis Supabase
+      let allSales = data || [];
+      console.log('✅ Ventes Supabase chargées:', allSales.length);
+
+      // 2️⃣ Ventes en attente depuis localStorage
+      const pendingSales = salePersistenceService.getPendingSales();
+      const displayPendingSales = pendingSales
+        .filter(s => s.status !== 'completed') // Pas les complétées (déjà dans Supabase)
+        .map(s => ({
+          ...s,
+          id: s.id, // ID temporaire du localStorage
+          sale_date: s.createdAt, // Utiliser createdAt pour le tri
+          is_pending: true, // Marqueur pour les styles
+          sale_status: s.status, // Afficher le statut
+        }));
+
+      console.log('📋 Ventes en attente depuis queue:', displayPendingSales.length);
+
+      // 3️⃣ Fusionner et trier
+      allSales = [...displayPendingSales, ...allSales].sort((a, b) => {
+        const dateA = new Date(a.sale_date || a.createdAt).getTime();
+        const dateB = new Date(b.sale_date || b.createdAt).getTime();
+        return dateB - dateA; // Trier par date décroissante
+      });
+
+      console.log('📊 Total ventes affichées (Supabase + queue):', allSales.length);
+      setSales(allSales);
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Erreur inconnue';
       console.error('🔴 loadSales Error:', message);
@@ -389,40 +386,15 @@ export default function CommerceApp({ onDataReady }) {
     return <div />;
   }
 
-  // AFFICHER LE LOADING SI LES DONNÉES NE SONT PAS INITIALISÉES
-  if (!dataInitialized) {
+  // DOUBLE PROTECTION: Ne pas afficher le loading du profil ici
+  // AppWrapper gère déjà le profileLoading
+  // Cette vérification est un fallback au cas où profileLoading se reste coincé
+  if (profileLoading) {
+    console.warn('⚠️ CommerceApp: ProfileLoading is true, should be handled by AppWrapper');
+    // Afficher le contenu quand même après un certain délai
     return (
-      <div className="loading-screen" style={{
-        display: 'flex',
-        justifyContent: 'center',
-        alignItems: 'center',
-        height: '100vh',
-        width: '100%',
-        flexDirection: 'column',
-        gap: '20px',
-        background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
-      }}>
-        <div style={{
-          width: '40px',
-          height: '40px',
-          border: '3px solid rgba(255, 255, 255, 0.3)',
-          borderTop: '3px solid white',
-          borderRadius: '50%',
-          animation: 'spin 0.6s linear infinite',
-        }}>
-        </div>
-        <p style={{
-          color: 'white',
-          fontSize: '16px',
-          fontWeight: '500',
-          margin: '0',
-          textAlign: 'center',
-        }}>Chargement des données...</p>
-        <style>{`
-          @keyframes spin {
-            to { transform: rotate(360deg); }
-          }
-        `}</style>
+      <div className="loading-screen">
+        <p>Chargement du profil...</p>
       </div>
     );
   }
@@ -623,13 +595,51 @@ export default function CommerceApp({ onDataReady }) {
                   <div className="card">
                     <h3 className="card-title">Dernières Ventes</h3>
                     {sales.slice(0, 5).map(sale => (
-                      <div key={sale.id} className="item-row">
+                      <div 
+                        key={sale.id} 
+                        className={`item-row ${sale.is_pending ? 'pending-sale' : ''}`}
+                        style={sale.is_pending ? { 
+                          borderLeft: '4px solid #ff9800',
+                          opacity: sale.sale_status === 'failed' ? 0.7 : 1,
+                          backgroundColor: sale.sale_status === 'syncing' ? '#fff3e0' : 'transparent'
+                        } : {}}
+                      >
                         <div>
-                          <p className="item-name">{sale.product_name}</p>
-                          <p className="item-category">{new Date(sale.sale_date).toLocaleDateString('fr-FR')}</p>
+                          <p className="item-name">
+                            {sale.product_name}
+                            {sale.is_pending && (
+                              <span style={{
+                                display: 'inline-block',
+                                marginLeft: '8px',
+                                fontSize: '0.75rem',
+                                padding: '2px 6px',
+                                backgroundColor: 
+                                  sale.sale_status === 'syncing' ? '#ff9800' :
+                                  sale.sale_status === 'pending' ? '#4caf50' :
+                                  sale.sale_status === 'failed' ? '#f44336' : '#2196f3',
+                                color: 'white',
+                                borderRadius: '3px',
+                                fontWeight: 'bold',
+                              }}>
+                                {sale.sale_status === 'syncing' ? '⏳ Sync' :
+                                 sale.sale_status === 'pending' ? '💾 En attente' :
+                                 sale.sale_status === 'failed' ? '❌ Erreur' : '✓'}
+                              </span>
+                            )}
+                          </p>
+                          <p className="item-category">
+                            {new Date(sale.sale_date || sale.createdAt).toLocaleDateString('fr-FR')}
+                            {sale.is_pending && sale.retryCount > 0 && (
+                              <span style={{ marginLeft: '8px', fontSize: '0.75rem', color: '#f44336' }}>
+                                (Tentative {sale.retryCount}/5)
+                              </span>
+                            )}
+                          </p>
                         </div>
                         <div className="item-amount">
-                          <p className="item-price">{Number(sale.total_price).toLocaleString('en-US')}</p>
+                          <p className="item-price">
+                            {Number(sale.total_price || (sale.sale_price * sale.quantity)).toLocaleString('en-US')}
+                          </p>
                           <p className="item-qty">{sale.quantity} unités</p>
                         </div>
                       </div>
@@ -795,6 +805,7 @@ export default function CommerceApp({ onDataReady }) {
                   <table className="table">
                     <thead>
                       <tr>
+                        <th>Statut</th>
                         <th>Date</th>
                         <th>Produit</th>
                         <th>Qté</th>
@@ -804,13 +815,58 @@ export default function CommerceApp({ onDataReady }) {
                     </thead>
                     <tbody>
                       {sales.map(sale => {
-                        const profit = Number(sale.total_price) - (Number(sale.cost_price) * sale.quantity);
+                        const profit = Number(sale.total_price || (sale.sale_price * sale.quantity)) - (Number(sale.cost_price) * sale.quantity);
+                        const statusColor = sale.is_pending
+                          ? sale.sale_status === 'syncing'
+                            ? '#ff9800'
+                            : sale.sale_status === 'pending'
+                            ? '#4caf50'
+                            : sale.sale_status === 'failed'
+                            ? '#f44336'
+                            : '#2196f3'
+                          : '#4caf50';
+                        
+                        const statusLabel = sale.is_pending
+                          ? sale.sale_status === 'syncing'
+                            ? '⏳ Sync'
+                            : sale.sale_status === 'pending'
+                            ? '💾 En attente'
+                            : sale.sale_status === 'failed'
+                            ? '❌ Erreur'
+                            : '✓ Sync'
+                          : '✓ Ok';
+
                         return (
-                          <tr key={sale.id}>
-                            <td>{new Date(sale.sale_date).toLocaleDateString('fr-FR')}</td>
+                          <tr 
+                            key={sale.id}
+                            style={{
+                              backgroundColor: sale.is_pending && sale.sale_status === 'syncing' ? '#fff3e0' : 'transparent',
+                              opacity: sale.is_pending && sale.sale_status === 'failed' ? 0.7 : 1,
+                              borderLeft: sale.is_pending ? '4px solid ' + statusColor : 'none'
+                            }}
+                          >
+                            <td>
+                              <span style={{
+                                display: 'inline-block',
+                                padding: '4px 8px',
+                                backgroundColor: statusColor,
+                                color: 'white',
+                                borderRadius: '4px',
+                                fontSize: '0.85rem',
+                                fontWeight: 'bold',
+                              }}>
+                                {statusLabel}
+                              </span>
+                              {sale.is_pending && sale.retryCount > 0 && (
+                                <div style={{ fontSize: '0.75rem', color: '#f44336', marginTop: '2px' }}>
+                                  Tentative {sale.retryCount}/5
+                                </div>
+                              )}
+                            </td>
+                            <td>{new Date(sale.sale_date || sale.createdAt).toLocaleDateString('fr-FR')}</td>
                             <td className="product-name">{sale.product_name}</td>
                             <td>{sale.quantity}</td>
-                            <td className="revenue-value">{Number(sale.total_price).toLocaleString('en-US')}</td>
+                            <td className="revenue-value">{Number(sale.total_price || (sale.sale_price * sale.quantity)).toLocaleString('en-US')}</td>
                             <td className="profit-value">{profit.toLocaleString('en-US')}</td>
                           </tr>
                         );
