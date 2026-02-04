@@ -37,35 +37,7 @@ export default function CommerceApp() {
   const [queueStats, setQueueStats] = useState(null);
   const [syncStatus, setSyncStatus] = useState(null);
 
-  // Initialiser le hook de sync
-  const { processPendingSales, getQueueStats } = useSaleSync(user, useCallback((result) => {
-    console.log('✨ Sync complète:', result);
-    if (user && isAccountValid && !profileLoading) {
-      loadProducts();
-      loadSales();
-    }
-  }, [user, isAccountValid, profileLoading]));
-
-  // Fonction pour mettre à jour les stats de la queue
-  const updateQueueStats = useCallback(() => {
-    const stats = getQueueStats();
-    setQueueStats(stats);
-  }, [getQueueStats]);
-
-  // Charger les produits et ventes au démarrage
-  useEffect(() => {
-    if (user?.id && isAccountValid && !profileLoading) {
-      loadProducts();
-      loadSales();
-    }
-  }, [user?.id, isAccountValid, profileLoading, loadProducts, loadSales]);
-
-  // Mettre à jour les stats de la queue tous les 5 secondes
-  useEffect(() => {
-    updateQueueStats();
-    const interval = setInterval(updateQueueStats, 5000);
-    return () => clearInterval(interval);
-  }, [getQueueStats]);
+  // Définir loadProducts en premier
   const loadProducts = useCallback(async () => {
     if (!user || profileLoading) return;
     setAppLoading(true);
@@ -147,6 +119,36 @@ export default function CommerceApp() {
       console.error('🔴 loadSales Error:', message);
     }
   }, [user]);
+
+  // Maintenant initialiser le hook de sync APRÈS avoir défini loadProducts et loadSales
+  const { processPendingSales, getQueueStats } = useSaleSync(user, useCallback((result) => {
+    console.log('✨ Sync complète:', result);
+    if (user && isAccountValid && !profileLoading) {
+      loadProducts();
+      loadSales();
+    }
+  }, [user, isAccountValid, profileLoading, loadProducts, loadSales]));
+
+  // Fonction pour mettre à jour les stats de la queue
+  const updateQueueStats = useCallback(() => {
+    const stats = getQueueStats();
+    setQueueStats(stats);
+  }, [getQueueStats]);
+
+  // Charger les produits et ventes au démarrage
+  useEffect(() => {
+    if (user?.id && isAccountValid && !profileLoading) {
+      loadProducts();
+      loadSales();
+    }
+  }, [user?.id, isAccountValid, profileLoading, loadProducts, loadSales]);
+
+  // Mettre à jour les stats de la queue tous les 5 secondes
+  useEffect(() => {
+    updateQueueStats();
+    const interval = setInterval(updateQueueStats, 5000);
+    return () => clearInterval(interval);
+  }, [updateQueueStats]);
 
   const handleAddProduct = async () => {
     if (!user) {
